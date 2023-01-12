@@ -19,22 +19,27 @@ object BudgetService {
         }
     }
 
-    suspend fun getYearStats(param: BudgetYearParam): BudgetYearStatsResponse = withContext(Dispatchers.IO) {
-        transaction {
-            val query = BudgetTable
-                .select { BudgetTable.year eq param.year }
-                .limit(param.limit, param.offset)
+ suspend fun getYearStats(param: BudgetYearParam): BudgetYearStatsResponse = withContext(Dispatchers.IO) {
+     transaction {
+         val baseQuery = BudgetTable.select { BudgetTable.year eq param.year }
 
-            val total = query.count()
-            val data = BudgetEntity.wrapRows(query).map { it.toResponse() }
+         // Считаем общее количество записей (до пагинации)
+         val total = baseQuery.count()
 
-            val sumByType = data.groupBy { it.type.name }.mapValues { it.value.sumOf { v -> v.amount } }
+         val query = baseQuery
+             .orderBy(BudgetTable.month to SortOrder.ASC, BudgetTable.amount to SortOrder.DESC) // Добавляем сортировку
+             .limit(param.limit, param.offset)
 
-            return@transaction BudgetYearStatsResponse(
-                total = total,
-                totalByType = sumByType,
-                items = data
-            )
-        }
-    }
+         val data = BudgetEntity.wrapRows(query).map { it.toResponse() }
+
+         val sumByType = baseQuery.groupBy { it[BudgetTable.type].name }
+             .mapValues { (_, records) -> records.sumOf { it[BudgetTable.amount] } }
+
+         return@transaction BudgetYearStatsResponse(
+             total = total, // Теперь total считает все записи, а не только те, что попали в лимит
+             totalByType = sumByType,
+             items = data
+         )
+     }
+  }
 }
